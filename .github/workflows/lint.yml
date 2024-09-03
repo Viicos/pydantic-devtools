@@ -16,7 +16,7 @@ jobs:
         run: |
           pdm sync -dG lint
       - name: Run Ruff formatter
-        run: ruff format --diff
+        run: pdm run ruff format --diff
 
   ruff-check:
     name: Check code linting with Ruff
@@ -31,7 +31,7 @@ jobs:
         run: |
           pdm sync -dG lint
       - name: Run Ruff formatter
-        run: ruff check --output-format=github
+        run: pdm run ruff check --output-format=github
 
   pyright:
     name: Run typechecking with pyright
@@ -46,4 +46,4 @@ jobs:
         run: |
           pdm sync -dG lint
       - name: Run pyright
-        run: pyright
+        run: pdm run pyright
