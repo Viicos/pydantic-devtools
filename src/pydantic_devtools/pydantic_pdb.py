@@ -83,6 +83,8 @@ class PydanticPdb(Pdb):
         return Group(repr_field, Syntax(f"{name}: {annotation}", lexer="python", theme="monokai", line_numbers=False))
 
     def do_pc(self, arg: str) -> None:
+        """Print context about the current Pydantic schema generation process."""
+
         from pydantic import BaseModel
         from pydantic._internal._generate_schema import GenerateSchema
         from pydantic._internal._generics import _generic_recursion_cache
