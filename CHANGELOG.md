@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0 (TBD)
+## 0.2.0 (2024-09-10)
 
 - Add a new `pc` (Pydantic context) command, displaying useful
   information about the current schema generation context.
