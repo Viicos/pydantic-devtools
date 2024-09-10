@@ -25,6 +25,7 @@ classifiers = [
 ]
 dependencies = [
     "rich>=11.0.0",  # max depth in pretty printing added.
+    "pydantic>=2.8.0",
 ]
 requires-python = ">=3.9"
 readme = "README.md"
@@ -67,4 +68,6 @@ select = [
 ]
 ignore = [
     "B904",
+    "PLR0912",
+    "PLR0915",
 ]
