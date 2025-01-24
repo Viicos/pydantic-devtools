@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0 (2025-01-24)
+
+- Add a `pps()` pretty-print function, analoguous to the `pps` breakpoint command.
+- Add `disable/enable_breakpoint()` functions.
+- Various bug fixes and improvements.
+
 ## 0.2.0 (2024-09-10)
 
 - Add a new `pc` (Pydantic context) command, displaying useful

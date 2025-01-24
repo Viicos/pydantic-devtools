@@ -2,6 +2,26 @@
 
 A collection of utilities to facilitate debugging of Pydantic's internals.
 
+## Pretty-print core schemas
+
+The `pps()` function can be used to debug Pydantic core schemas:
+
+```python
+class Model(BaseModel): ...
+
+# If the provided argument is a Pydantic model/dataclass type adapter,
+# the core schema is automatically fetched:
+pps(
+    Model,
+    max_depth=2,  # Default: None
+    strip_metadata=False  # Default: True
+)
+> {
+>     'type': 'model',
+>     ...,
+> }
+```
+
 ## The Pydantic debugger
 
 `pydantic-devtools` provides a custom [`Pdb`](https://docs.python.org/3/library/pdb.html#pdb.Pdb)
@@ -14,7 +34,7 @@ To use the Pydantic debugger:
 
 ### `pps` command
 
-The `pps` (pretty-print schema) command can be used to debug Pydantic core schemas:
+The `pps` (pretty-print schema) command can be used to debug Pydantic core schemas (same as the `pps()` function):
 
 ```shell
 (Pydantic pdb) pps schema
