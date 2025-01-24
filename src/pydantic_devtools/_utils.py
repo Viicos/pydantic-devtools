@@ -6,26 +6,22 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 
-def clean_schema(obj: Any) -> Any:
-    """A utility function to remove irrelevant information from a core schema.
-
-    The logic mimics the `pydantic._internal._core_utils._strip_metadata` function,
-    with some deviations regarding metadata handling.
-    """
+def clean_schema(obj: Any, strip_metadata: bool = True) -> Any:
+    """A utility function to remove irrelevant information from a core schema."""
 
     if isinstance(obj, Mapping):
         new_dct = {}
         for k, v in obj.items():
-            if k == "metadata":
+            if k == "metadata" and strip_metadata:
                 new_metadata = {}
 
                 for meta_k, meta_v in v.items():
                     if meta_k in ("pydantic_js_functions", "pydantic_js_annotation_functions"):
                         new_metadata["js_metadata"] = "<stripped>"
                     else:
-                        new_metadata[meta_k] = clean_schema(meta_v)
+                        new_metadata[meta_k] = clean_schema(meta_v, strip_metadata=strip_metadata)
 
-                if len(new_metadata) == 1:
+                if list(new_metadata.keys()) == ["js_metadata"]:
                     new_metadata = {"<stripped>"}
 
                 new_dct[k] = new_metadata
@@ -33,11 +29,11 @@ def clean_schema(obj: Any) -> Any:
             elif k in ("custom_init", "root_model") and not v:
                 continue
             else:
-                new_dct[k] = clean_schema(v)
+                new_dct[k] = clean_schema(v, strip_metadata=strip_metadata)
 
         return new_dct
-    elif isinstance(obj, Sequence):
-        return [clean_schema(v) for v in obj]
+    elif isinstance(obj, Sequence) and not isinstance(obj, str):
+        return [clean_schema(v, strip_metadata=strip_metadata) for v in obj]
     else:
         return obj
 

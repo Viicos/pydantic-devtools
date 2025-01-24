@@ -7,14 +7,29 @@ from typing import TYPE_CHECKING, Any
 
 from rich.console import Console, Group, RenderableType
 from rich.markup import escape
-from rich.pretty import pprint
 from rich.syntax import Syntax
+from rich.table import Table
 from rich.tree import Tree
 
-from ._utils import clean_schema, get_field_annotation
+from ._utils import get_field_annotation
+from .pretty_print import pps
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
+    from pydantic.fields import FieldInfo
+
+
+_enable_breakpoint = True
+
+
+def enable_breakpoint() -> None:
+    global _enable_breakpoint
+    _enable_breakpoint = True
+
+
+def disable_breakpoint() -> None:
+    global _enable_breakpoint
+    _enable_breakpoint = False
 
 
 class PydanticPdb(Pdb):
@@ -30,17 +45,19 @@ class PydanticPdb(Pdb):
         except Exception:
             return  # _getval() has displayed the error
 
-        cleaned_schema = clean_schema(val)
-
         try:
-            pprint(cleaned_schema, console=self._console, max_depth=max_depth)
+            pps(val, console=self._console, max_depth=max_depth)
         except Exception:
             self._error_exc()  # pyright: ignore[reportAttributeAccessIssue]
 
     def do_pps(self, arg: str) -> None:
         """Pretty-print the Pydantic core schema."""
 
-        arg, *depth_tp = arg.split()
+        args = arg.split()
+        if not len(args):
+            return
+
+        arg, *depth_tp = args
 
         if depth_tp:
             try:
@@ -65,29 +82,43 @@ class PydanticPdb(Pdb):
             cls_location = ""
         return f":red_square: [bold red]{message} '{escape(cls.__name__)}'{cls_location}[/bold red]"
 
-    def _gsc_repr_model(self, model_cls: type[BaseModel]) -> RenderableType:
-        return self._gsc_repr_cls(model_cls, "Building schema for Model")
+    def _gsc_repr_model(self, cls: type[BaseModel]) -> RenderableType:
+        return self._gsc_repr_cls(cls, "Building schema for Model")
 
-    def _gsc_repr_typeddict(self, model_cls: type[Any]) -> RenderableType:
-        return self._gsc_repr_cls(model_cls, "Building schema for TypedDict")
+    def _gsc_repr_dataclass(self, cls: type[Any]) -> RenderableType:
+        # pydantic.dataclasses.is_pydanticdataclass does not work for incomplete dataclasses:
+        dc_repr = "Pydantic dataclass" if "__pydantic_fields__" in cls.__dict__ else "dataclass"
+        return self._gsc_repr_cls(cls, f"Building schema for {dc_repr}")
 
-    def _gsc_repr_namedtuple(self, model_cls: type[Any]) -> RenderableType:
-        return self._gsc_repr_cls(model_cls, "Building schema for NamedTuple")
+    def _gsc_repr_typeddict(self, cls: type[Any]) -> RenderableType:
+        return self._gsc_repr_cls(cls, "Building schema for TypedDict")
 
-    def _gsc_repr_field(self, name: str, parent_cls: type[Any]) -> RenderableType:
+    def _gsc_repr_namedtuple(self, cls: type[Any]) -> RenderableType:
+        return self._gsc_repr_cls(cls, "Building schema for NamedTuple")
+
+    def _gsc_repr_field(self, name: str, field_info: FieldInfo, parent_cls: type[Any]) -> RenderableType:
         annotation = get_field_annotation(parent_cls, name)
         repr_field = f":green_circle: [bold green]Field {name!r}[/bold green]"
-        if annotation is None:
-            return repr_field
 
-        return Group(repr_field, Syntax(f"{name}: {annotation}", lexer="python", theme="monokai", line_numbers=False))
+        table = Table(show_header=False, pad_edge=False, box=None, expand=True)
+        table.add_column("1", ratio=1)
+        table.add_column("2", ratio=5)
+        table.add_row("FieldInfo annotation", Syntax(f"{field_info.annotation}", lexer="pycon"))
+
+        if annotation is not None:
+            table.add_row("Original annotation", Syntax(annotation, lexer="python"))
+
+        return Group(
+            repr_field,
+            table,
+        )
 
     def do_pc(self, arg: str) -> None:
         """Print context about the current Pydantic schema generation process."""
 
         from pydantic import BaseModel
         from pydantic._internal._generate_schema import GenerateSchema
-        from pydantic._internal._generics import _generic_recursion_cache
+        from pydantic._internal._generics import _GENERIC_TYPES_CACHE, _generic_recursion_cache
         from pydantic._internal._model_construction import ModelMetaclass
 
         generic_recursion_cache = _generic_recursion_cache.get()
@@ -118,10 +149,16 @@ class PydanticPdb(Pdb):
                 current_cls = nt_cls
                 node = node.add(self._gsc_repr_namedtuple(nt_cls))
 
+            if method_name == "_dataclass_schema":
+                dc_cls: type[Any] = frame.f_locals["dataclass"]
+                current_cls = dc_cls
+                node = node.add(self._gsc_repr_dataclass(dc_cls))
+
             if method_name == "_common_field_schema":
                 field_name: str = frame.f_locals["name"]
+                field_info: FieldInfo = frame.f_locals["field_info"]
                 assert current_cls is not None
-                node.add(self._gsc_repr_field(field_name, current_cls))
+                node.add(self._gsc_repr_field(field_name, field_info, current_cls))
 
             if (
                 method_name == "__new__"
@@ -133,42 +170,62 @@ class PydanticPdb(Pdb):
                 if new_cls is not None:
                     node = node.add(self._gsc_repr_cls(new_cls, "Creating Model"))
                 else:
-                    node = node.add(f":red_square: [bold red] Creating model '{escape(cls_name)}'[/bold red]")
+                    node = node.add(f":red_square: [bold red]Creating model '{escape(cls_name)}'[/bold red]")
 
             if method_name == "__class_getitem__" and issubclass(frame.f_locals["cls"], BaseModel):
-                model_name: str | None = frame.f_locals["model_name"]
+                model_name: str | None = frame.f_locals.get("model_name")
+                cached = " (cached)" if frame.f_locals.get("cached") else ""
                 if model_name:
-                    node = node.add(f":red_square: [bold red] Parametrizing model '{escape(model_name)}'[/bold red]")
+                    node = node.add(
+                        f":red_square: [bold red]Parametrizing model '{escape(model_name)}'{cached}[/bold red]"
+                    )
                 else:
                     origin_cls: type[BaseModel] = frame.f_locals["cls"]
                     typevar_values: tuple[type[Any], ...] = frame.f_locals["typevar_values"]
                     node = node.add(
-                        f":red_square: [bold red] Parametrizing model '{escape(origin_cls.__name__)}' "
+                        f":red_square: [bold red]Parametrizing model '{escape(origin_cls.__name__)}'{cached} "
                         f"with types: {typevar_values} [/bold red]",
                     )
+
+            if method_name == "model_rebuild" and (
+                frame.f_locals["force"] or not frame.f_locals["cls"].__pydantic_complete__
+            ):
+                rebuilt_cls: type[BaseModel] = frame.f_locals["cls"]
+                node = node.add(f":red_square: [bold red]Rebuilding model '{escape(rebuilt_cls.__name__)}'[/bold red]")
 
         if last_gen_schema_inst is not None:
             model_type_stack = last_gen_schema_inst.model_type_stack._stack
             field_name_stack = last_gen_schema_inst.field_name_stack._stack
             defs = last_gen_schema_inst.defs
             typevars_map = last_gen_schema_inst._typevars_map
-            if defs.definitions:
-                self._console.print(f"[underline]Collected defs:[/underline] {', '.join(defs.definitions.keys())}")
+
+            self._console.print(f"[italic]GenerateSchema ID:[/italic] {id(last_gen_schema_inst)}")
+            if defs._definitions:  # pyright: ignore[reportAttributeAccessIssue]
+                self._console.print(f"[italic]Collected defs:[/italic] {', '.join(defs._definitions.keys())}")  # pyright: ignore[reportAttributeAccessIssue]
             if model_type_stack:
                 self._console.print(
-                    f"[underline]Model type stack:[/underline] {', '.join(cls.__name__ for cls in model_type_stack)}"
+                    f"[italic]Model type stack:[/italic] {', '.join(cls.__name__ for cls in model_type_stack)}"
                 )
             if field_name_stack:
-                self._console.print(f"[underline]Field name stack:[/underline] {', '.join(field_name_stack)}")
+                self._console.print(f"[italic]Field name stack:[/italic] {', '.join(field_name_stack)}")
             if typevars_map:
-                self._console.print("[underline]Typevars map:[/underline]", typevars_map, end=" ")
+                self._console.print("[italic]Typevars map:[/italic]", typevars_map, end=" ")
 
         if generic_recursion_cache:
-            self._console.print("[underline]Generic recursion cache:[/underline]", generic_recursion_cache, end=" ")
+            self._console.print("[italic]Generic recursion cache:[/italic]", generic_recursion_cache, end=" ")
+
+        cached_generic_models = [
+            (tp.__name__, tp.__pydantic_generic_metadata__)
+            for val in _GENERIC_TYPES_CACHE.valuerefs()
+            if (tp := val()) is not None
+        ]
+        if cached_generic_models:
+            self._console.print("[italic]Cached generic models:[/italic]", cached_generic_models, end=" ")
 
         self._console.print(tree)
 
 
 def pdb(*, max_depth: int | None = None) -> None:
-    pdb = PydanticPdb(max_depth=max_depth)
-    pdb.set_trace(sys._getframe().f_back)
+    if _enable_breakpoint:
+        pdb = PydanticPdb(max_depth=max_depth)
+        pdb.set_trace(sys._getframe().f_back)
